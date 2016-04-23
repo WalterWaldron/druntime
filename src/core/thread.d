@@ -196,9 +196,12 @@ version( Windows )
         extern (Windows) uint thread_entryPoint( void* arg )
         {
             Thread  obj = cast(Thread) arg;
-            assert( obj );
+            if( !obj )
+                onThreadError( "Cannot create null thread" );
 
-            assert( obj.m_curr is &obj.m_main );
+
+            if( obj.m_curr !is &obj.m_main )
+                onThreadError( "Thread context is not thread main" );
             obj.m_main.bstack = getStackBottom();
             obj.m_main.tstack = obj.m_main.bstack;
             obj.m_tlsgcdata = rt_tlsgc_init();
@@ -311,13 +314,15 @@ else version( Posix )
             {
                 Thread obj = cast(Thread)arg;
             }
-            assert( obj );
+            if( !obj )
+                onThreadError( "Cannot create null thread" );
 
             // loadedLibraries need to be inherited from parent thread
             // before initilizing GC for TLS (rt_tlsgc_init)
             version (Shared) inheritLoadedLibraries(loadedLibraries);
 
-            assert( obj.m_curr is &obj.m_main );
+            if( obj.m_curr !is &obj.m_main )
+                onThreadError( "Thread context is not thread main" );
             obj.m_main.bstack = getStackBottom();
             obj.m_main.tstack = obj.m_main.bstack;
             obj.m_tlsgcdata = rt_tlsgc_init();
@@ -1755,15 +1760,17 @@ private:
     static void add( Thread t, bool rmAboutToStart = true ) nothrow
     in
     {
-        assert( t );
-        assert( !t.next && !t.prev );
+        if (!t)
+            onThreadError("Cannot add null thread");
+        if (t.next || t.prev)
+            onThreadError("Thread already added");
     }
     body
     {
         slock.lock_nothrow();
         scope(exit) slock.unlock_nothrow();
-        assert(t.isRunning); // check this with slock to ensure pthread_create already returned
-        assert(!suspendDepth); // must be 0 b/c it's only set with slock held
+        if (suspendDepth) // must be 0 b/c it's only set with slock held
+            onThreadError( "Cannot add thread while threads suspended" );
 
         if (rmAboutToStart)
         {
@@ -1776,7 +1783,8 @@ private:
                     break;
                 }
             }
-            assert(idx != -1);
+            if (idx == -1)
+                onThreadError("Could not find thread in AboutToStart");
             import core.stdc.string : memmove;
             memmove(pAboutToStart + idx, pAboutToStart + idx + 1, Thread.sizeof * (nAboutToStart - idx - 1));
             pAboutToStart =
